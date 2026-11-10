@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Свет у мониторов</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --night: rgba(82,81,78,0.14); --twilight: rgba(82,81,78,0.07);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --night: rgba(195,194,183,0.10); --twilight: rgba(195,194,183,0.05);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+  --night: rgba(195,194,183,0.10); --twilight: rgba(195,194,183,0.05);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+       font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0; }
+.sub, .note { color: var(--ink2); }
+.note { font-size: 12px; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px;
+        padding: 16px; margin: 16px 0; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink2); font-weight: 600; font-size: 12px; }
+svg { display: block; width: 100%; overflow: visible; }
+svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted);
+           font-variant-numeric: tabular-nums; }
+svg .sunlabel { fill: var(--ink2); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0 4px; color: var(--ink2); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.key { display: inline-block; width: 16px; height: 2px; border-radius: 1px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.diamond { display: inline-block; width: 8px; height: 8px; transform: rotate(45deg); border: 2px solid var(--ink2); }
+.hit { cursor: crosshair; outline: none; }
+.hit:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+.tip { position: fixed; pointer-events: none; display: none; z-index: 10; min-width: 150px;
+       background: var(--surface); border: 1px solid var(--ring); border-radius: 8px;
+       box-shadow: 0 4px 16px rgba(0,0,0,.14); padding: 8px 10px; font-size: 12px; }
+.tip .t { color: var(--ink2); margin-bottom: 4px; }
+.tip .row { display: flex; align-items: center; gap: 8px; }
+.tip .row b { font-size: 13px; }
+.tip .row .lbl { color: var(--ink2); }
+details summary { cursor: pointer; color: var(--ink2); margin-top: 8px; font-size: 12px; }
+.empty { color: var(--ink2); padding: 24px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Свет у мониторов</h1>
+  <div class="sub" id="sub"></div>
+
+  <section class="card" id="overview-card">
+    <h2>Все дни вместе</h2>
+    <div class="note" id="overview-note"></div>
+    <div class="legend" id="overview-legend"></div>
+    <div id="overview"></div>
+  </section>
+
+  <section class="card">
+    <h2>По дням</h2>
+    <div class="note">Пик — самый яркий момент (медиана за минуту). «Темнее 10 лк» — с какого времени
+      после полудня свет держится ниже 10 лк хотя бы 10 минут. «Записей» — сколько раз приложение писало
+      яркость в мониторы при плавном переходе.</div>
+    <div class="scroll"><table id="summary"></table></div>
+  </section>
+
+  <div id="days"></div>
+  <p class="note" id="folder"></p>
+</main>
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+const D = /*DATA*/null;
+const SLOTS = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--s8"];
+const NS = "http://www.w3.org/2000/svg";
+const LUX_MIN = 0.3;
+const KIND = { hand: "твоя поправка", joystick: "кнопками монитора", auto: "по свету", off: "автояркость выключена", on: "автояркость включена" };
+const MODE = { auto: "автояркость", off: "выключена", hold: "пауза после ручной смены" };
+
+const hhmm = m => { const t = Math.round(m); return String(Math.floor(t / 60) % 24).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0"); };
+const fmtLux = v => v == null ? "—" : (v < 10 ? v.toFixed(1).replace(".", ",") : Math.round(v).toLocaleString("ru-RU"));
+const luxTick = v => v >= 1000 ? (v / 1000) + " тыс." : String(v);
+
+function el(tag, attrs, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function txt(parent, x, y, s, attrs = {}) {
+  const t = el("text", Object.assign({ x, y }, attrs), parent);
+  t.textContent = s;
+  return t;
+}
+function cell(tr, s, tag = "td") { const c = document.createElement(tag); c.textContent = s; tr.appendChild(c); return c; }
+
+// --- scales ---
+function luxScale(maxLux, top, h) {
+  const lo = Math.log10(LUX_MIN);
+  const hi = Math.ceil(Math.log10(Math.max(1000, maxLux * 1.2)));
+  const y = v => top + h - (Math.log10(Math.max(v, LUX_MIN)) - lo) / (hi - lo) * h;
+  const ticks = [];
+  for (let p = 0; p <= hi; p++) ticks.push(10 ** p);
+  return { y, ticks };
+}
+
+// path through [minute, value] points, broken where minutes are missing
+function linePath(pts, x, y, step = false) {
+  let d = "", prev = null;
+  for (const [m, v] of pts) {
+    if (v == null) { prev = null; continue; }
+    const X = x(m), Y = y(v);
+    if (prev == null || m - prev[0] > 3) d += `M${X.toFixed(1)},${Y.toFixed(1)}`;
+    else if (step) d += `H${X.toFixed(1)}V${Y.toFixed(1)}`;
+    else d += `L${X.toFixed(1)},${Y.toFixed(1)}`;
+    prev = [m, v];
+  }
+  return d;
+}
+function bandPath(pts, x, y) {   // pts: [minute, lo, hi]
+  const segs = []; let cur = [];
+  for (const p of pts) {
+    if (p[1] == null) { if (cur.length) segs.push(cur); cur = []; continue; }
+    if (cur.length && p[0] - cur[cur.length - 1][0] > 3) { segs.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) segs.push(cur);
+  return segs.map(s => "M" + s.map(p => `${x(p[0]).toFixed(1)},${y(p[2]).toFixed(1)}`).join("L")
+    + "L" + s.slice().reverse().map(p => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("L") + "Z").join("");
+}
+
+function nearest(pts, m, maxGap = 3) {   // pts sorted by minute
+  let lo = 0, hi = pts.length - 1;
+  if (hi < 0) return null;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (pts[mid][0] < m) lo = mid + 1; else hi = mid; }
+  let best = pts[lo];
+  if (lo > 0 && Math.abs(pts[lo - 1][0] - m) < Math.abs(best[0] - m)) best = pts[lo - 1];
+  return Math.abs(best[0] - m) <= maxGap ? best : null;
+}
+
+// --- shared drawing ---
+function frame(svg, x, top, h, W, padL, padR) {
+  for (let hr = 0; hr <= 24; hr += 3) {
+    const X = x(hr * 60);
+    el("line", { x1: X, x2: X, y1: top, y2: top + h, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+  }
+}
+function sunShade(svg, x, sun, top, h) {
+  if (!sun) return;
+  const r = (a, b, fill) => { if (b > a) el("rect", { x: x(a), y: top, width: x(b) - x(a), height: h, fill }, svg); };
+  r(0, sun.dawn, "var(--night)"); r(sun.dawn, sun.sunrise, "var(--twilight)");
+  r(sun.sunset, sun.dusk, "var(--twilight)"); r(sun.dusk, 1440, "var(--night)");
+}
+function sunLines(svg, x, sun, top, h, labels) {
+  if (!sun) return;
+  for (const [m, s, anchor, dx] of [[sun.sunrise, "восход " + hhmm(sun.sunrise), "start", 4],
+                                   [sun.sunset, "закат " + hhmm(sun.sunset), "end", -4]]) {
+    el("line", { x1: x(m), x2: x(m), y1: top, y2: top + h, stroke: "var(--axis)", "stroke-width": 1 }, svg);
+    if (labels) txt(svg, x(m) + dx, top - 6, s, { "text-anchor": anchor, class: "sunlabel" });
+  }
+}
+function xAxis(svg, x, y0) {
+  for (let hr = 0; hr <= 24; hr += 3)
+    txt(svg, x(hr * 60), y0 + 14, String(hr).padStart(2, "0") + ":00", { "text-anchor": hr === 0 ? "start" : hr === 24 ? "end" : "middle" });
+}
+function luxAxis(svg, sc, padL, W, padR) {
+  for (const t of sc.ticks) {
+    const Y = sc.y(t);
+    el("line", { x1: padL, x2: W - padR, y1: Y, y2: Y, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    txt(svg, padL - 6, Y + 4, luxTick(t), { "text-anchor": "end" });
+  }
+  txt(svg, padL - 6, sc.y(LUX_MIN) + 4, "0", { "text-anchor": "end" });
+}
+
+// --- tooltip ---
+const tip = document.getElementById("tip");
+function showTip(clientX, clientY, title, rows) {
+  tip.replaceChildren();
+  const t = document.createElement("div"); t.className = "t"; t.textContent = title; tip.appendChild(t);
+  for (const r of rows) {
+    const row = document.createElement("div"); row.className = "row";
+    if (r.color) { const k = document.createElement("span"); k.className = "key"; k.style.background = r.color; row.appendChild(k); }
+    const b = document.createElement("b"); b.textContent = r.value; row.appendChild(b);
+    const l = document.createElement("span"); l.className = "lbl"; l.textContent = r.label; row.appendChild(l);
+    tip.appendChild(row);
+  }
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let X = clientX + 14, Y = clientY + 14;
+  if (X + w > innerWidth - 8) X = clientX - w - 14;
+  if (Y + h > innerHeight - 8) Y = clientY - h - 14;
+  tip.style.left = X + "px"; tip.style.top = Y + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+
+// hover + keyboard on a transparent rect; onAt(minute, clientX, clientY) draws/returns
+function interactive(svg, x, xinv, top, h, padL, W, padR, onAt) {
+  const cross = el("line", { y1: top, y2: top + h, stroke: "var(--ink2)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: padL, y: top, width: W - padL - padR, height: h, fill: "transparent", class: "hit", tabindex: 0 }, svg);
+  let kbMin = 720;
+  const at = (m, cx, cy) => {
+    m = Math.max(0, Math.min(1439, m));
+    cross.setAttribute("x1", x(m)); cross.setAttribute("x2", x(m)); cross.setAttribute("visibility", "visible");
+    onAt(m, cx, cy);
+  };
+  hit.addEventListener("pointermove", e => {
+    const b = svg.getBoundingClientRect();
+    at(xinv((e.clientX - b.left) * (W / b.width)), e.clientX, e.clientY);
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  hit.addEventListener("focus", () => { const b = svg.getBoundingClientRect(); at(kbMin, b.left + x(kbMin) * b.width / W, b.top + top); });
+  hit.addEventListener("blur", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  hit.addEventListener("keydown", e => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    kbMin = Math.max(0, Math.min(1439, kbMin + (e.key === "ArrowRight" ? 10 : -10)));
+    const b = svg.getBoundingClientRect(); at(kbMin, b.left + x(kbMin) * b.width / W, b.top + top);
+  });
+}
+
+// --- charts ---
+function overview(container, days) {
+  container.replaceChildren();
+  const W = Math.max(320, container.clientWidth), padL = 44, padR = 12, top = 22, h = 240;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${top + h + 22}`, role: "img",
+    "aria-label": "Свет по времени суток, все дни на одном графике" }, container);
+  const x = m => padL + m / 1440 * (W - padL - padR), xinv = X => (X - padL) / (W - padL - padR) * 1440;
+  const maxLux = Math.max(...days.flatMap(d => d.pts.map(p => p[1] || 0)));
+  const sc = luxScale(maxLux, top, h);
+  const last = days[days.length - 1];
+  sunShade(svg, x, last.sun, top, h);
+  frame(svg, x, top, h);
+  luxAxis(svg, sc, padL, W, padR);
+  sunLines(svg, x, last.sun, top, h, true);
+  xAxis(svg, x, top + h);
+  days.forEach((d, i) => el("path", { d: linePath(d.pts.map(p => [p[0], p[1]]), x, sc.y), fill: "none",
+    stroke: `var(${SLOTS[i]})`, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg));
+  interactive(svg, x, xinv, top, h, padL, W, padR, (m, cx, cy) => {
+    const rows = days.map((d, i) => { const p = nearest(d.pts, m); return { color: `var(${SLOTS[i]})`, value: p ? fmtLux(p[1]) + " лк" : "—", label: d.label }; });
+    showTip(cx, cy, hhmm(m), rows.reverse());
+  });
+}
+
+function dayChart(container, d) {
+  container.replaceChildren();
+  const W = Math.max(320, container.clientWidth), padL = 44, padR = 12;
+  const top = 22, h = 150, gap = 12, top2 = top + h + gap, h2 = 70;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${top2 + h2 + 22}`, role: "img",
+    "aria-label": `Свет и яркость за ${d.label}` }, container);
+  const x = m => padL + m / 1440 * (W - padL - padR), xinv = X => (X - padL) / (W - padL - padR) * 1440;
+  const sc = luxScale(Math.max(...d.pts.map(p => p[3] || 0)), top, h);
+  const yb = v => top2 + h2 - v / 100 * h2;
+  for (const [t, hh] of [[top, h], [top2, h2]]) { sunShade(svg, x, d.sun, t, hh); frame(svg, x, t, hh); }
+  luxAxis(svg, sc, padL, W, padR);
+  for (const v of [0, 50, 100]) {
+    el("line", { x1: padL, x2: W - padR, y1: yb(v), y2: yb(v), stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    txt(svg, padL - 6, yb(v) + 4, String(v), { "text-anchor": "end" });
+  }
+  sunLines(svg, x, d.sun, top, top2 + h2 - top, true);
+  xAxis(svg, x, top2 + h2);
+  // light: min-max wash + median line
+  el("path", { d: bandPath(d.pts.map(p => [p[0], p[2], p[3]]), x, sc.y), fill: "var(--s1)", "fill-opacity": 0.1 }, svg);
+  el("path", { d: linePath(d.pts.map(p => [p[0], p[1]]), x, sc.y), fill: "none", stroke: "var(--s1)",
+    "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  // brightness of the right (main) monitor
+  el("path", { d: linePath(d.pts.map(p => [p[0], p[5]]), x, yb, true), fill: "none", stroke: "var(--s2)",
+    "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  for (const e of d.ev) {
+    const v = e[4] ? e[4][e[4].length - 1] : null;
+    if (v == null) continue;
+    if (e[1] === "hand")
+      el("circle", { cx: x(e[0]), cy: yb(v), r: 4, fill: "var(--s2)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    else if (e[1] === "joystick")
+      el("rect", { x: x(e[0]) - 4, y: yb(v) - 4, width: 8, height: 8, fill: "var(--surface)", stroke: "var(--ink2)",
+        "stroke-width": 2, transform: `rotate(45 ${x(e[0])} ${yb(v)})` }, svg);
+  }
+  interactive(svg, x, xinv, top, top2 + h2 - top, padL, W, padR, (m, cx, cy) => {
+    const p = nearest(d.pts, m);
+    const rows = [];
+    if (p) {
+      rows.push({ color: "var(--s1)", value: fmtLux(p[1]) + " лк", label: p[2] != null && p[3] - p[2] >= 1 ? `от ${fmtLux(p[2])} до ${fmtLux(p[3])}` : "свет" });
+      rows.push({ color: "var(--s2)", value: p[5] == null ? "—" : String(p[5]), label: p[4] != null ? `яркость, левый ${p[4]}` : "яркость" });
+      rows.push({ value: "", label: MODE[p[6]] || p[6] });
+    } else rows.push({ value: "", label: "нет данных" });
+    const evs = d.ev.filter(e => Math.abs(e[0] - m) <= 2 && KIND[e[1]]);
+    for (const e of evs) rows.push({ value: e[4] ? e[4].join("/") : "", label: KIND[e[1]] });
+    showTip(cx, cy, `${d.label}, ${hhmm(m)}`, rows);
+  });
+}
+
+function hourTable(d) {
+  const t = document.createElement("table");
+  const hr = document.createElement("tr");
+  for (const s of ["Час", "Свет, медиана", "мин", "макс", "Яркость лев/прав"]) cell(hr, s, "th");
+  t.appendChild(hr);
+  for (let h = 0; h < 24; h++) {
+    const ps = d.pts.filter(p => p[0] >= h * 60 && p[0] < h * 60 + 60);
+    if (!ps.length) continue;
+    const lux = ps.map(p => p[1]).filter(v => v != null).sort((a, b) => a - b);
+    const lo = ps.map(p => p[2]).filter(v => v != null), hi = ps.map(p => p[3]).filter(v => v != null);
+    const lastP = ps[ps.length - 1];
+    const tr = document.createElement("tr");
+    cell(tr, String(h).padStart(2, "0") + ":00");
+    cell(tr, lux.length ? fmtLux(lux[lux.length >> 1]) : "—");
+    cell(tr, lo.length ? fmtLux(Math.min(...lo)) : "—");
+    cell(tr, hi.length ? fmtLux(Math.max(...hi)) : "—");
+    cell(tr, lastP[5] == null ? "—" : `${lastP[4]}/${lastP[5]}`);
+    t.appendChild(tr);
+  }
+  return t;
+}
+
+function summaryTable(days) {
+  const t = document.getElementById("summary");
+  t.replaceChildren();
+  const hr = document.createElement("tr");
+  for (const s of ["День", "Данных, ч", "Восход", "Закат", "Пик света", "Свет на закате", "Темнее 10 лк",
+                   "Смен по свету", "Твоих поправок", "Кнопками монитора", "Записей"]) cell(hr, s, "th");
+  t.appendChild(hr);
+  for (const d of days.slice().reverse()) {
+    const s = d.sum, tr = document.createElement("tr");
+    cell(tr, d.label);
+    cell(tr, String(s.hours).replace(".", ","));
+    cell(tr, d.sun ? hhmm(d.sun.sunrise) : "—"); cell(tr, d.sun ? hhmm(d.sun.sunset) : "—");
+    cell(tr, s.peak_lux == null ? "—" : `${fmtLux(s.peak_lux)} лк в ${hhmm(s.peak_at)}`);
+    cell(tr, s.at_sunset == null ? "—" : fmtLux(s.at_sunset) + " лк");
+    cell(tr, s.dark_from == null ? "—" : "с " + hhmm(s.dark_from));
+    cell(tr, String(s.auto)); cell(tr, String(s.hand)); cell(tr, String(s.joystick)); cell(tr, String(s.writes));
+    t.appendChild(tr);
+  }
+}
+
+function render() {
+  const days = D.days;
+  document.getElementById("sub").textContent = days.length
+    ? `${D.location} · ${days[0].label} — ${days[days.length - 1].label} · обновлено ${D.generated}`
+    : `${D.location} · обновлено ${D.generated}`;
+  document.getElementById("folder").textContent = `Исходные записи: ${D.folder}`;
+  if (!days.length) {
+    document.getElementById("overview").replaceChildren(Object.assign(document.createElement("div"), { className: "empty", textContent: "Записей пока нет: приложение пишет их раз в 2 секунды, пока работает." }));
+    return;
+  }
+  const shown = days.slice(-8);
+  document.getElementById("overview-note").textContent = (days.length > 8 ? "Последние 8 дней. " : "")
+    + "Свет, медиана за минуту; шкала логарифмическая."
+    + (shown[shown.length - 1].sun ? ` Тень — ночь и сумерки, восход и закат — по последнему дню (${shown[shown.length - 1].label}).` : " Восход и закат не показаны: в настройках нет location.");
+  const lg = document.getElementById("overview-legend");
+  lg.replaceChildren();
+  if (shown.length > 1) shown.forEach((d, i) => {
+    const s = document.createElement("span"); const k = document.createElement("i");
+    k.className = "key"; k.style.background = `var(${SLOTS[i]})`; s.appendChild(k);
+    s.appendChild(document.createTextNode(d.label)); lg.appendChild(s);
+  });
+  overview(document.getElementById("overview"), shown);
+  summaryTable(days);
+  const box = document.getElementById("days");
+  box.replaceChildren();
+  for (const d of days.slice().reverse()) {
+    const card = document.createElement("section"); card.className = "card";
+    const h = document.createElement("h2"); h.textContent = d.label; card.appendChild(h);
+    const lg2 = document.createElement("div"); lg2.className = "legend";
+    lg2.innerHTML = '<span><i class="key" style="background:var(--s1)"></i>свет, лк (полоса — от мин. до макс. за минуту)</span>'
+      + '<span><i class="key" style="background:var(--s2)"></i>яркость правого монитора</span>'
+      + '<span><i class="dot" style="background:var(--s2)"></i>твоя поправка из трея</span>'
+      + '<span><i class="diamond"></i>кнопками монитора</span>';
+    card.appendChild(lg2);
+    const chart = document.createElement("div"); card.appendChild(chart);
+    const det = document.createElement("details"); const sm = document.createElement("summary");
+    sm.textContent = "Таблица по часам"; det.appendChild(sm); det.appendChild(hourTable(d)); card.appendChild(det);
+    box.appendChild(card);
+    dayChart(chart, d);
+  }
+}
+
+render();
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+</script>
+</body>
+</html>

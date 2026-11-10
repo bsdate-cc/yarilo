@@ -1,0 +1,64 @@
+# Light sensor for Yarilo: ESP32-C3 Super Mini + GY-302 (BH1750), ESPHome.
+#   SDA = GPIO0, SCL = GPIO1, power 3.3 and G; ADDR not connected -> address 0x23.
+# Lux over Wi-Fi: GET http://lux-sensor.local/sensor/Illuminance
+#   -> {"id":"sensor/Illuminance","value":29.2,"state":"29.2 lx"}   (the name in the URL is case-sensitive)
+# Build and flash from this folder in PowerShell or cmd (ESP-IDF refuses to install from Git Bash/MSYS):
+#   esphome run lux-sensor.yaml
+# Secrets: copy secrets.example.yaml to secrets.yaml and fill it in.
+
+esphome:
+  name: lux-sensor
+  friendly_name: Lux sensor
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:            # the log goes to USB (USB-Serial/JTAG)
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # some Super Mini boards have a weak antenna: at full power the link drops
+  output_power: 8.5dB
+  ap:              # no network found -> its own access point for setup
+    ssid: "Lux Sensor Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+api:               # for Home Assistant, if you have one
+  encryption:
+    key: !secret api_key
+  reboot_timeout: 0s   # without Home Assistant it would reboot every 15 minutes
+
+ota:
+  - platform: esphome
+    encryption:      # the same key as the api
+
+web_server:
+  port: 80
+  version: 3
+  local: true      # the page needs no internet (its script is built into the firmware)
+  ota: false       # no firmware upload form on the page (it would have no password)
+
+status_led:        # the blue LED of the board; blinks on an error
+  pin:
+    number: GPIO8
+    inverted: true
+
+i2c:
+  sda: GPIO0
+  scl: GPIO1
+  scan: true
+
+sensor:
+  - platform: bh1750
+    name: "Illuminance"
+    id: illuminance
+    address: 0x23
+    update_interval: 2s
+  - platform: wifi_signal
+    name: "WiFi signal"
+    update_interval: 60s
