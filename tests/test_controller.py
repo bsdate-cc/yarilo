@@ -28,23 +28,38 @@ def test_small_difference_is_ignored():
     assert c.decide(200) is None
 
 
-def test_change_after_hold():
+def test_change_after_hold_is_paced():
     c = make()
-    feed(c, 0, 60, 60)             # target ~65.5, difference ~10.5 < fast_jump
+    feed(c, 0, 60, 60)             # target ~65.5
     assert c.decide(20) is None    # timer starts
     assert c.decide(49) is None
-    assert c.decide(50) == 65      # held 30 s -> rounded to a step of 5
+    assert c.decide(50) == 56      # held 30 s -> one step now
+    assert c.decide(52) is None
+    c.applied = 56                 # App does this after a successful write
+    assert c.decide(53) == 57      # the hold does not restart
 
 
-def test_big_jump_uses_fast_hold():
+def test_big_jump_has_no_fast_path():
     c = make()
     feed(c, 0, 20, 300)            # target 90, difference 35
     assert c.decide(10) is None
-    assert c.decide(15) == 90
+    assert c.decide(15) is None
+    assert c.decide(39) is None
+    assert c.decide(40) == 56
+
+
+def test_next_delay_follows_step_deadline():
+    c = make()
+    feed(c, 0, 60, 60)
+    assert c.decide(20) is None
+    assert c.decide(50) == 56
+    assert c.next_delay(50, poll_s=2) == 2
+    assert c.next_delay(52, poll_s=2) == 1
+    assert c.next_delay(53, poll_s=2) == 0
 
 
 def test_timer_resets_when_difference_disappears():
-    c = make()
+    c = make(window_s=20)
     feed(c, 0, 20, 60)
     assert c.decide(20) is None
     feed(c, 22, 60, 30)            # back to the current level
@@ -52,7 +67,7 @@ def test_timer_resets_when_difference_disappears():
     feed(c, 62, 120, 60)
     assert c.decide(85) is None    # a new timer starts at 85, not at 20
     assert c.decide(114) is None
-    assert c.decide(115) == 65
+    assert c.decide(115) == 56
 
 
 def test_direction_flip_restarts_timer():
@@ -62,7 +77,7 @@ def test_direction_flip_restarts_timer():
     feed(c, 22, 80, 12)            # then darker: target ~43.1, difference ~ -11.9
     assert c.decide(45) is None    # direction flipped at 45 -> timer restarts
     assert c.decide(74) is None
-    assert c.decide(75) == 45
+    assert c.decide(75) == 54
 
 
 def test_short_spike_is_filtered_by_median():
@@ -87,6 +102,47 @@ def test_first_write_when_current_unknown():
     assert c.decide(4) == 55
 
 
+def test_catchup_uses_18_second_pace_without_normal_hold():
+    c = make(applied=50)
+    feed(c, 0, 20, 300)               # target=90, diff=40
+    c.start_catchup()
+    assert c.decide(20) == 51         # no hold_s=30
+    assert c.decide(20.44) is None
+    c.applied = 51
+    assert c.decide(20.45) == 52      # 18 / 40 = 0.45 s/step
+
+
+def test_catchup_waits_for_fresh_history():
+    c = make(applied=50)
+    c.start_catchup()
+    c.add_sample(100, 300)
+    feed(c, 102, 108, 300)
+    assert c.decide(108) is None
+    c.add_sample(110, 300)
+    assert c.decide(110) == 51        # exactly 10 s of new history
+
+
+def test_clear_samples_discards_pre_sleep_light():
+    c = make(applied=50)
+    feed(c, 0, 20, 300)
+    c.start_catchup()
+    c.clear_samples()
+    feed(c, 60, 70, 30)               # target=55, not the old 90
+    assert c.target(70) == 55
+    assert c.decide(70) == 51
+
+
+def test_catchup_reverses_from_current_value():
+    c = make(applied=50)
+    feed(c, 0, 20, 300)
+    c.start_catchup()
+    assert c.decide(20) == 51
+    c.applied = 51
+    c.clear_samples()
+    feed(c, 60, 70, 3)                # target=25
+    assert c.decide(70) == 50
+
+
 def test_paused_by_user():
     c = make()
     c.user_paused = True
@@ -102,7 +158,9 @@ def test_manual_pause_expires():
     feed(c, 590, 610, 300)
     assert c.decide(595) is None
     assert c.decide(600) is None   # pause is over, the timer starts
-    assert c.decide(605) == 90
+    assert c.decide(605) is None
+    assert c.decide(629) is None
+    assert c.decide(630) == 56
 
 
 def test_result_is_clamped():
@@ -110,7 +168,7 @@ def test_result_is_clamped():
     feed(c, 0, 60, 300)            # raw target 90 is clamped to 80: difference 10, normal hold
     assert c.decide(10) is None
     assert c.decide(39) is None
-    assert c.decide(40) == 80
+    assert c.decide(40) == 71
 
 
 def test_nudge_switches_auto_off_without_learning():

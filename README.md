@@ -68,21 +68,25 @@ the defaults from [`yarilo/config.py`](yarilo/config.py).
 | `sensor_json_field` | `"value"` | the JSON field with the lux number |
 | `location` | `null` | `{"name": "Moscow", "lat": 55.75, "lon": 37.62}` turns on the night curve |
 | `points_day`, `points_night` | see config.py | `[lux, brightness]` points |
-| `smooth` | `true` | auto changes go one unit at a time; `false` jumps in one write |
+| `auto_step_s` | `3` | seconds between automatic one-unit brightness steps |
+| `catchup_s` | `18` | approximate duration of a large catch-up after wake/start |
 
 ## Auto brightness
 
 How it decides:
-- **Ignores short changes.** It takes the median light over 20 seconds, so a hand or a shadow
+- **Ignores short changes.** It takes the median light over 60 seconds, so a hand or a shadow
   changes nothing.
-- **Changes rarely.** Only when the target differs by at least 4 for 30 seconds. A jump of 15 or more,
-  such as a room light switched on, needs only 5 seconds.
+- **Moves gradually.** Only when the target differs by at least 4 for 30 seconds. Then brightness
+  moves by one unit every `auto_step_s`; large changes use the same pace.
+- **Catches up after wake/start.** Yarilo reads the actual monitor values, waits 10 seconds for DDC,
+  then follows fresh light one unit at a time over about `catchup_s` for a large difference. After a
+  computer/sensor gap it first collects 10 seconds of fresh samples; stale or missing light means no writes.
 - **Lets you take over.** The slider or Brighter/Darker turns auto brightness off; tick "Auto
   brightness" to bring it back. If you change brightness with the monitor's own buttons, Yarilo
   leaves it alone for an hour.
 
-A monitor may save each change in its own memory. That is why Yarilo changes rarely and has the
-`smooth` setting.
+A monitor may save each change in its own memory. Automatic steps are spaced by `auto_step_s`;
+increase it if DDC/CI is slow.
 
 The sensor in [`firmware/`](firmware/) is an ESP32-C3 Super Mini with a GY-302 (BH1750) on ESPHome;
 the wiring and flashing are described there. A printable wall case for it is in

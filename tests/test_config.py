@@ -24,6 +24,13 @@ def test_partial_file_is_merged(tmp_path):
     assert cfg["step"] == DEFAULTS["step"]
 
 
+def test_smooth_brightness_defaults(tmp_path):
+    cfg = load(tmp_path / "config.json")
+    assert cfg["window_s"] == 60
+    assert cfg["auto_step_s"] == 3.0
+    assert cfg["catchup_s"] == 18.0
+
+
 def test_broken_file_is_kept_aside(tmp_path):
     p = tmp_path / "config.json"
     p.write_text("{not json", encoding="utf-8")

@@ -28,15 +28,13 @@ DEFAULTS = {
     "sensor_urls": [],               # e.g. ["http://lux-sensor.local/sensor/Illuminance"]
     "sensor_json_field": "value",
     "poll_s": 2,
-    "window_s": 20,                  # median over this long: a finger or a shadow is ignored
+    "window_s": 60,                  # median over this long: a finger or a shadow is ignored
     "stale_s": 30,                   # no answer this long -> the sensor is down
     "threshold": 4,                  # change only when the target differs this much...
     "hold_s": 30,                    # ...for this long
-    "fast_jump": 15,                 # a bigger difference (room light on)...
-    "fast_hold_s": 5,                # ...waits only this long
+    "auto_step_s": 3.0,              # seconds between automatic one-point steps
+    "catchup_s": 18.0,               # a large catch-up after wake/start takes about this long
     "manual_pause_min": 60,          # brightness changed with the monitor buttons -> wait
-    "smooth": True,                  # change by 1 at a time (more writes to the monitor)
-    "smooth_step_s": 0.15,
     "record_light": True,            # light log for the chart (only with a sensor)
 
     # --- the sun (optional): day and night curves ---
