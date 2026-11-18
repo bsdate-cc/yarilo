@@ -15,7 +15,7 @@ from logging.handlers import RotatingFileHandler
 import pystray
 
 from . import __version__, autostart, config, i18n, icons, report
-from .controller import Controller, Settings, base_from, monitor_values, numbered, offsets_for, ramp
+from .controller import Controller, Settings, base_from, monitor_values, numbered, offsets_for
 from .ddc import Monitors, get_brightness, set_brightness
 from .hotkeys import Hotkeys
 from .i18n import _
@@ -25,12 +25,15 @@ from .sun import day_weight, sun_elevation
 
 log = logging.getLogger("yarilo")
 
+SLEEP_RETRY_S = 60   # monitors that do not answer (asleep) are asked again this rarely
+WAKE_GRACE_S = 10    # and are left alone this long after they answer again
+
 
 def settings_from(cfg: dict) -> Settings:
     return Settings(
         window_s=cfg["window_s"], stale_s=cfg["stale_s"], threshold=cfg["threshold"],
-        step=cfg["step"], hold_s=cfg["hold_s"], fast_jump=cfg["fast_jump"],
-        fast_hold_s=cfg["fast_hold_s"], min_b=cfg["min"], max_b=cfg["max"],
+        step=cfg["step"], hold_s=cfg["hold_s"], auto_step_s=cfg["auto_step_s"],
+        catchup_s=cfg["catchup_s"], min_b=cfg["min"], max_b=cfg["max"],
         manual_pause_s=cfg["manual_pause_min"] * 60,
     )
 
@@ -55,6 +58,12 @@ class App:
         self.ddc_error = False
         self.rec = Recorder(config.DATA_DIR / "lux")
         self._drag_before = None
+        self._next_resync = 0.0
+        self._woke_at: float | None = None
+        self._last_tick: float | None = None
+        self._auto_before: list[int] | None = None
+        self._auto_after: list[int] | None = None
+        self._auto_direction = 0
         self.popup = None
         self.hotkeys = None
         self.icon = pystray.Icon("yarilo", icons.image("on"), _("Ярило"), self._menu())
@@ -118,7 +127,7 @@ class App:
                 vis = self._visible(all_mons)
                 return [(n, v) for (n, _m), v in zip(vis, self._read([m for _n, m in vis]))]
 
-    def sync(self, quiet: bool = False):
+    def sync(self, quiet: bool = False, catchup: bool = False, t: float | None = None):
         """Take what the monitors show now as the current brightness."""
         with Monitors() as all_mons:
             vis = self._visible(all_mons)
@@ -127,17 +136,32 @@ class App:
             self.numbers = [n for n, _m in vis]
             self.expected = vals
             self.ctl.applied = base_from(vals, self._offsets())
+            if catchup:
+                self.ctl.start_catchup()
+                self._woke_at = time.monotonic() if t is None else t
             log.info("monitors now: %s", vals)
         elif not quiet:
             log.warning("could not read the monitors: %s", vals)
 
-    def resync_if_unknown(self):
-        """After a failed write: read back what the monitors really show."""
+    def resync_if_unknown(self, t: float | None = None):
+        """After a failed write: read back what the monitors really show - but a sleeping
+        monitor only once a minute: DDC/CI requests can wake some monitors up for a moment."""
+        t = time.monotonic() if t is None else t
+        if self.expected is not None or t < self._next_resync:
+            return
+        self.sync(quiet=True, catchup=True, t=t)
         if self.expected is None:
-            self.sync(quiet=True)
+            self._next_resync = t + SLEEP_RETRY_S
+        else:
+            log.info("the monitors answer again")
 
-    def _apply_values(self, values_for, t: float, kind: str, check_buttons: bool, smooth: bool) -> bool:
-        """values_for(numbers, current) -> new values; writes them, maybe step by step."""
+    def just_woke(self, t: float) -> bool:
+        """Monitors that have just come back get a few seconds before anything is written."""
+        return self._woke_at is not None and t - self._woke_at < WAKE_GRACE_S
+
+    def _apply_values(self, values_for, t: float, kind: str, check_buttons: bool,
+                      commanded_base: int | None = None) -> bool:
+        """values_for(numbers, current) -> new values; write that one list."""
         with Monitors() as all_mons:
             vis = self._visible(all_mons)
             if not vis:
@@ -148,6 +172,8 @@ class App:
             if (check_buttons and same_set
                     and any(c is not None and c != e for c, e in zip(current, self.expected))):
                 # someone used the monitor buttons: do not fight
+                if kind == "auto":
+                    self._finish_auto(t)
                 log.info("changed with the monitor buttons: %s -> %s; pause %d min",
                          self.expected, current, self.cfg["manual_pause_min"])
                 self._event("joystick", t, self.expected, current)
@@ -157,23 +183,30 @@ class App:
                 self.ctl.pause_for_manual(t)
                 return False
             values = values_for(numbers, current)
-            start = current if all(c is not None for c in current) else None
-            steps = ramp(start, values) if (smooth and start) else [values]
-            ok = True
-            for i, step in enumerate(steps):
-                if not self._write(mons, step):
-                    ok = False
-                    break
-                if i < len(steps) - 1:
-                    time.sleep(self.cfg["smooth_step_s"])
-        before = self.expected if same_set else None
+            before = self.expected if same_set else None
+            if kind == "auto":
+                target_base = commanded_base if commanded_base is not None else base_from(values, self._offsets(numbers))
+                direction = 0 if self.ctl.applied is None else (1 if target_base > self.ctl.applied else -1)
+                if self._auto_direction and direction != self._auto_direction:
+                    self._finish_auto(t)
+                if self._auto_after is None:
+                    self._auto_before = before
+                self._auto_direction = direction
+            ok = self._write(mons, values)
         if ok:
-            if kind != "preview":   # dragging writes many times; the release is logged
+            if kind not in ("preview", "auto"):
                 lux = self.ctl.smoothed_lux(t)
                 log.info("%s: %s -> %s at %s lx", kind, before, values, "?" if lux is None else f"{lux:.1f}")
                 self._event(kind, t, before, values)
             self.numbers, self.expected = numbers, values
-            self.ctl.applied = base_from(values, self._offsets(numbers))
+            if kind == "auto" and commanded_base is not None:
+                self.ctl.applied = commanded_base
+            else:
+                self.ctl.applied = base_from(values, self._offsets(numbers))
+            if kind == "auto":
+                self._auto_after = list(values)
+                if self.ctl.settled(t):
+                    self._finish_auto(t)
             self.ddc_error = False
         else:
             # a sleeping monitor may have refused while another took the value:
@@ -182,6 +215,9 @@ class App:
             if not self.ddc_error:
                 log.warning("the monitors did not take %s", values)
             self.ddc_error = True
+            if kind == "auto":
+                self.ctl.cancel_motion()
+                self._finish_auto(t)
         return ok
 
     def _together(self, base: int):
@@ -190,10 +226,11 @@ class App:
 
     def apply(self, base: int, t: float, by_hand: bool = False) -> bool:
         return self._apply_values(self._together(base), t, "hand" if by_hand else "auto",
-                                  check_buttons=not by_hand, smooth=self.cfg["smooth"] and not by_hand)
+                                  check_buttons=not by_hand, commanded_base=base)
 
     # --- by hand: slider, brighter/darker, hotkeys ---
     def _auto_off_by_hand(self, t):
+        self._finish_auto(t)
         if self.has_sensor and not self.ctl.user_paused:
             self.ctl.user_paused = True
             log.info("auto brightness off: brightness by hand")
@@ -215,7 +252,7 @@ class App:
         """While dragging: straight to the monitors. number None - all together."""
         with self.lock:
             fn = self._together(int(value)) if number is None else self._one(number, int(value))
-            self._apply_values(fn, time.monotonic(), "preview", False, False)
+            self._apply_values(fn, time.monotonic(), "preview", False)
 
     def slider_commit(self, value: int, number: int | None = None):
         with self.lock:
@@ -237,7 +274,7 @@ class App:
 
             def values_for(numbers, current):
                 return [_clamp((c if c is not None else 50) + delta, lo, hi) for c in current]
-            self._apply_values(values_for, t, "hand", check_buttons=False, smooth=False)
+            self._apply_values(values_for, t, "hand", check_buttons=False)
             if self.ctl.applied is not None:
                 self.ctl.set_by_hand(t, self.ctl.applied)
         self.refresh()
@@ -263,6 +300,17 @@ class App:
             self.hotkeys.start()
 
     # --- the log ---
+    def _finish_auto(self, t: float) -> None:
+        """Log one whole automatic transition, not every intermediate DDC write."""
+        before, after = self._auto_before, self._auto_after
+        self._auto_before = self._auto_after = None
+        self._auto_direction = 0
+        if after is None:
+            return
+        lux = self.ctl.smoothed_lux(t)
+        log.info("auto: %s -> %s at %s lx", before, after, "?" if lux is None else f"{lux:.1f}")
+        self._event("auto", t, before, after)
+
     def _event(self, kind, t, before, after):
         if not (self.has_sensor and self.cfg["record_light"]):
             return
@@ -280,7 +328,7 @@ class App:
     def loop(self):
         try:
             with self.lock:
-                self.sync()
+                self.sync(catchup=True)
         except Exception:
             log.exception("first read of the monitors")
         self.refresh()
@@ -289,18 +337,25 @@ class App:
                 self._tick()
             except Exception:
                 log.exception("error in the loop")
-            self.stop.wait(self.cfg["poll_s"])
+            self.stop.wait(self.ctl.next_delay(time.monotonic(), self.cfg["poll_s"]))
 
     def _tick(self):
         self._reload_if_changed()
         if not self.has_sensor:
+            self.ctl.cancel_motion()
             return
         lux = self.sensor.read()
         t = time.monotonic()
         with self.lock:
+            if self._last_tick is not None and t - self._last_tick > self.cfg["stale_s"]:
+                self.ctl.clear_samples()
+                log.info("old light samples discarded after a pause")
+            self._last_tick = t
             self._update_sun()
-            self.resync_if_unknown()
+            self.resync_if_unknown(t)
             if lux is not None:
+                if self.sensor_down:
+                    self.ctl.clear_samples()
                 self.ctl.add_sample(t, lux)
                 self.last_ok = datetime.now()
                 if self.sensor_down:
@@ -309,9 +364,11 @@ class App:
             elif not self.sensor_down and self.ctl.smoothed_lux(t) is None:
                 self.sensor_down = True
                 log.warning("the sensor does not answer: %s", self.sensor.last_error)
-            new = self.ctl.decide(t)
+            new = None if (self.expected is None or self.just_woke(t)) else self.ctl.decide(t)
             if new is not None:
                 self.apply(new, t)
+            elif self._auto_after is not None and self.ctl.settled(t):
+                self._finish_auto(t)
             if self.cfg["record_light"]:
                 try:
                     self.rec.sample(datetime.now(), lux, self.expected, self._mode())
@@ -450,6 +507,7 @@ class App:
         subprocess.Popen(["notepad.exe", str(self.cfg_path)])
 
     def quit(self):
+        self._finish_auto(time.monotonic())
         log.info("quit")
         self.stop.set()
         if self.hotkeys is not None:

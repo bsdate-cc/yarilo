@@ -96,3 +96,21 @@ def test_dragging_is_not_logged_as_events(make, tmp_path):
     assert not (tmp_path / "lux" / "events.csv").exists()
     app.slider_commit(50)
     assert (tmp_path / "lux" / "events.csv").read_text(encoding="utf-8").count("\n") == 3   # header, off, hand
+
+
+@pytest.mark.parametrize("start, offset, target, second_base", [
+    (0, -5, 0, 3),       # lower clamp: base 5 -> 4 -> 3 while physical value stays 0
+    (100, 5, 100, 97),   # upper clamp: base 95 -> 96 -> 97 while physical value stays 100
+], ids=["lower", "upper"])
+def test_clamped_offset_does_not_repeat_forever(make, start, offset, target, second_base):
+    app, _state = make([start], sensor_urls=["http://sensor/x"], monitor_offsets=[offset])
+    app.ctl.s.hold_s = 0
+    app.ctl.day_points = app.ctl.night_points = [(1, target), (300, target)]
+    for t in range(0, 12, 2):
+        app.ctl.add_sample(t, 30)
+    assert app.apply(app.ctl.decide(10), 10)
+    assert app.apply(app.ctl.decide(13), 13)
+    assert app.ctl.applied == second_base
+    assert app.ctl.decide(16) is None
+    events = app.rec.folder.joinpath("events.csv").read_text(encoding="utf-8").splitlines()
+    assert len(events) == 2             # header and one logical auto transition

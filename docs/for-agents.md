@@ -31,10 +31,10 @@ capabilities request, and `--monitor N` checks one monitor only.
 |---|---|---|
 | `answers: false` on every monitor | DDC/CI is off in the monitor menus; or a dock, KVM or adapter is in between; or the GPU driver blocks it (some virtual machines, DisplayLink) | ask the user to enable DDC/CI in the monitor's OSD and to try a direct cable |
 | `answers: false` on one monitor | that monitor or its cable path; laptop panels always say no | add its number to `skip_monitors` so Yarilo leaves it alone |
-| `write.ok: true` but `read_back` differs | the monitor applies slowly or rounds | write, wait 0.5–1 s and read again; raise `smooth_step_s` if smooth changes stutter |
+| `write.ok: true` but `read_back` differs | the monitor applies slowly or rounds | write, wait 0.5–1 s and read again; raise `auto_step_s` if automatic changes stutter |
 | `maximum` is not 100 | normal for some models | nothing to do: `ddc.py` scales |
 | `lists_brightness_0x10: false` | the monitor lists something else, or its capabilities string is incomplete | first try 0x10 anyway: `probe --monitor N --set 40`; if nothing changes, look for a backlight code in `vcp_codes` (0x6B is a common one) and try `probe --monitor N --vcp 0x6B --set 40` |
-| `read_ms` above ~300 | slow DDC/CI | everything is synchronous and just slower; keep `smooth` false so a change is one write |
+| `read_ms` above ~300 | slow DDC/CI | each step is synchronous and just slower; increase `auto_step_s` |
 | monitors in a different order than on the desk | Yarilo orders by the desktop position (Windows display settings) | match the order in Windows, or use the numbers the probe prints |
 
 ## 3. Codes never to write while experimenting
@@ -64,14 +64,14 @@ The settings live in `%USERPROFILE%\.yarilo\config.json`; the defaults and comme
 | `skip_monitors` | monitor numbers (left to right from 1) to leave alone |
 | `monitor_offsets` | per-monitor offsets for the linked slider |
 | `min`, `max` | for a monitor that goes black at 0, or is too bright at 100 |
-| `smooth`, `smooth_step_s` | how auto brightness steps |
+| `auto_step_s`, `catchup_s` | normal automatic pace and the faster catch-up after wake/start |
 
 ## 5. Where things are in the code
 
 | File | What it does |
 |---|---|
 | `yarilo/ddc.py` | every DDC/CI call (dxva2): enumeration left to right, get/set with one retry, percent scaling, capabilities. A monitor-specific quirk such as a delay after a write, a different code or an extra retry belongs here. |
-| `yarilo/app.py` | the tray. `_apply_values` is the one write path: it reads the monitors, notices changes made with the monitor buttons, writes (smoothly or at once) and records what is on the monitors. |
+| `yarilo/app.py` | the tray. `_apply_values` is the one write path: it reads the monitors, notices changes made with the monitor buttons, writes one value list and records what is on the monitors. |
 | `yarilo/popup.py` | the slider window (tkinter). |
 | `yarilo/controller.py` | auto brightness logic, pure functions with no I/O: median, dead band, hold times, curves. |
 | `yarilo/sensor.py` | the light sensor over HTTP. For Home Assistant or another source, change `http_fetch` (for example add an `Authorization` header) and keep `parse`. |
